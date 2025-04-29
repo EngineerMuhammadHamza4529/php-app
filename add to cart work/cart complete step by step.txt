@@ -1,0 +1,300 @@
+1. Create Cart Table (cart)
+This table will store the products added to a user's cart. It will link the users and products tables through foreign keys.
+
+SQL Code for Cart Table:
+sql
+Copy code
+CREATE TABLE cart (
+    cart_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    product_id INT,
+    quantity INT,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE
+);
+2. Cart Functionality (Adding Products to Cart)
+File Name: add_to_cart.php
+This file will handle the logic for adding a product to the user's cart. It will check if the product is already in the cart and update the quantity if needed, or add the product if it isn't there yet.
+
+Code for add_to_cart.php:
+php
+Copy code
+<?php
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
+include 'db.php'; // Database connection
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $user_id = $_SESSION['user_id'];
+    $product_id = $_POST['product_id'];
+    $quantity = $_POST['quantity'];
+
+    // Check if the product is already in the cart
+    $query = "SELECT * FROM cart WHERE user_id = ? AND product_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ii", $user_id, $product_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows > 0) {
+        // If the product is already in the cart, update the quantity
+        $query = "UPDATE cart SET quantity = quantity + ? WHERE user_id = ? AND product_id = ?";
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param("iii", $quantity, $user_id, $product_id);
+        $stmt->execute();
+    } else {
+        // If the product is not in the cart, add it
+        $query = "INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)";
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param("iii", $user_id, $product_id, $quantity);
+        $stmt->execute();
+    }
+
+    header("Location: view_cart.php"); // Redirect to view cart page
+}
+?>
+3. View Cart Page (view_cart.php)
+This page will display the products that the user has added to their cart. It will show the product name, quantity, price, and the total cost. You will also provide an option to remove items from the cart.
+
+File Name: view_cart.php
+Code for view_cart.php:
+php
+Copy code
+<?php
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
+include 'db.php'; // Database connection
+
+$user_id = $_SESSION['user_id'];
+
+$query = "
+    SELECT c.cart_id, p.product_name, p.price, c.quantity 
+    FROM cart c 
+    JOIN products p ON c.product_id = p.product_id 
+    WHERE c.user_id = ?";
+$stmt = $conn->prepare($query);
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$result = $stmt->get_result();
+
+$total_price = 0;
+while ($row = $result->fetch_assoc()) {
+    $total_price += $row['price'] * $row['quantity'];
+    echo "
+    <div>
+        <h3>{$row['product_name']}</h3>
+        <p>Price: {$row['price']}</p>
+        <p>Quantity: {$row['quantity']}</p>
+        <p>Total: " . ($row['price'] * $row['quantity']) . "</p>
+        <form method='POST' action='remove_from_cart.php'>
+            <input type='hidden' name='cart_id' value='{$row['cart_id']}'>
+            <button type='submit'>Remove</button>
+        </form>
+    </div>";
+}
+echo "<p>Total Price: $total_price</p>";
+?>
+4. Remove Item from Cart (remove_from_cart.php)
+This file will handle removing an item from the cart when the user clicks the "Remove" button.
+
+File Name: remove_from_cart.php
+Code for remove_from_cart.php:
+php
+Copy code
+<?php
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
+include 'db.php'; // Database connection
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $cart_id = $_POST['cart_id'];
+
+    $query = "DELETE FROM cart WHERE cart_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("i", $cart_id);
+    $stmt->execute();
+
+    header("Location: view_cart.php"); // Redirect to view cart page
+}
+?>
+5. Create Orders Table (orders)
+This table will store the orders placed by users after checking out. It will have a reference to the users table for the user who made the order.
+
+SQL Code for Orders Table:
+sql
+Copy code
+CREATE TABLE orders (
+    order_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total_price DECIMAL(10,2),
+    status VARCHAR(50) DEFAULT 'pending',
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+6. Checkout Process (checkout.php)
+This page will display the total cost of the items in the cart and allow users to confirm the order. Once the user confirms, the order will be created in the orders table, and the cart will be emptied.
+
+File Name: checkout.php
+Code for checkout.php:
+php
+Copy code
+<?php
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
+include 'db.php'; // Database connection
+
+$user_id = $_SESSION['user_id'];
+
+// Get the total price from the cart
+$query = "
+    SELECT SUM(p.price * c.quantity) AS total_price
+    FROM cart c 
+    JOIN products p ON c.product_id = p.product_id 
+    WHERE c.user_id = ?";
+$stmt = $conn->prepare($query);
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$result = $stmt->get_result();
+$row = $result->fetch_assoc();
+$total_price = $row['total_price'];
+
+echo "<h3>Total Price: $total_price</h3>";
+
+echo "
+    <form method='POST' action='place_order.php'>
+        <button type='submit'>Place Order</button>
+    </form>";
+?>
+7. Place Order (place_order.php)
+This file will handle the logic for creating an order in the orders table and clearing the user's cart.
+
+File Name: place_order.php
+Code for place_order.php:
+php
+Copy code
+<?php
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
+include 'db.php'; // Database connection
+
+$user_id = $_SESSION['user_id'];
+
+// Get the total price from the cart
+$query = "
+    SELECT SUM(p.price * c.quantity) AS total_price
+    FROM cart c 
+    JOIN products p ON c.product_id = p.product_id 
+    WHERE c.user_id = ?";
+$stmt = $conn->prepare($query);
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$result = $stmt->get_result();
+$row = $result->fetch_assoc();
+$total_price = $row['total_price'];
+
+// Insert the order into the orders table
+$query = "INSERT INTO orders (user_id, total_price) VALUES (?, ?)";
+$stmt = $conn->prepare($query);
+$stmt->bind_param("id", $user_id, $total_price);
+$stmt->execute();
+
+// Get the order ID
+$order_id = $stmt->insert_id;
+
+// Clear the user's cart
+$query = "DELETE FROM cart WHERE user_id = ?";
+$stmt = $conn->prepare($query);
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+
+echo "<h3>Your order has been placed successfully!</h3>";
+?>
+8. Admin Panel for Managing Orders (admin_orders.php)
+As an admin, you can view and manage orders. The admin can change the status of an order (e.g., from "pending" to "completed").
+
+File Name: admin_orders.php
+Code for admin_orders.php:
+php
+Copy code
+<?php
+session_start();
+if (!isset($_SESSION['admin_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
+include 'db.php'; // Database connection
+
+$query = "
+    SELECT o.order_id, u.name, o.total_price, o.order_date, o.status 
+    FROM orders o
+    JOIN users u ON o.user_id = u.user_id";
+$result = $conn->query($query);
+
+while ($row = $result->fetch_assoc()) {
+    echo "
+    <div>
+        <h3>Order ID: {$row['order_id']}</h3>
+        <p>User: {$row['name']}</p>
+        <p>Total Price: {$row['total_price']}</p>
+        <p>Status: {$row['status']}</p>
+        <form method='POST' action='update_order_status.php'>
+            <input type='hidden' name='order_id' value='{$row['order_id']}'>
+            <select name='status'>
+                <option value='pending' " . ($row['status'] == 'pending' ? 'selected' : '') . ">Pending</option>
+                <option value='completed' " . ($row['status'] == 'completed' ? 'selected' : '') . ">Completed</option>
+            </select>
+            <button type='submit'>Update Status</button>
+        </form>
+    </div>";
+}
+?>
+9. Update Order Status (update_order_status.php)
+This file will allow the admin to update the status of the order (e.g., "pending" to "completed").
+
+File Name: update_order_status.php
+Code for update_order_status.php:
+php
+Copy code
+<?php
+session_start();
+if (!isset($_SESSION['admin_id'])) {
+    header("Location: signin.php");
+    exit;
+}
+
+include 'db.php'; // Database connection
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $order_id = $_POST['order_id'];
+    $status = $_POST['status'];
+
+    $query = "UPDATE orders SET status = ? WHERE order_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("si", $status, $order_id);
+    $stmt->execute();
+
+    header("Location: admin_orders.php"); // Redirect back to orders page
+}
+?>
+This should give you a comprehensive flow for the Add to Cart, Checkout, Order Placement, and Admin Order Management in your PHP food ordering system.
